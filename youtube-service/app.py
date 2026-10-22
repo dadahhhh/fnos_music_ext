@@ -45,6 +45,8 @@ _searches: dict[str, tuple[float, list]] = {}
 _catalog_mode = "youtube_music"
 _oauth_lock = threading.RLock()
 _oauth_pending: dict = {}
+_oauth_search_backoff = 0.0
+_lyric_cache: dict = {}
 
 
 def oauth_read() -> dict:
@@ -279,7 +281,7 @@ def normalize(row: dict) -> dict | None:
 
 
 def search_sync(keyword: str, limit: int) -> list:
-    global _catalog_mode
+    global _catalog_mode, _oauth_search_backoff
     key = json.dumps([keyword, limit, proxy_url(), (DATA / "cookies.txt").stat().st_mtime_ns
                       if (DATA / "cookies.txt").is_file() else 0])
     with _lock:
@@ -289,13 +291,14 @@ def search_sync(keyword: str, limit: int) -> list:
     try:
         with _session() as session:
             try:
-                rows = client(session).search(keyword, filter="songs", limit=limit, ignore_spelling=True)
+                rows = client(session, use_oauth=time.monotonic() >= _oauth_search_backoff).search(keyword, filter="songs", limit=limit, ignore_spelling=True)
             except YTMusicError:
                 # A granted Google token can still be rejected by Music's
                 # private API. Public search can use the separately saved
                 # browser session without discarding or altering OAuth tokens.
                 if not oauth_status_sync().get("authorized"):
                     raise
+                _oauth_search_backoff = time.monotonic() + 600
                 rows = client(session, use_oauth=False).search(keyword, filter="songs", limit=limit, ignore_spelling=True)
     except requests.RequestException:
         rows = []
@@ -363,13 +366,16 @@ def resolve_sync(raw: str, fresh: bool = False) -> dict:
         cached = _urls.get(key)
         if not fresh and cached and cached[0] > time.monotonic():
             return cached[1]
-    opts = {"format": "bestaudio[ext=m4a]/bestaudio", "quiet": True, "no_warnings": True,
+    opts = {"format": "bestaudio/best", "quiet": True, "no_warnings": True,
             "skip_download": True, "noplaylist": True, "socket_timeout": 15, "retries": 1,
             "extractor_retries": 1, "logger": QuietLogger(), "proxy": proxy,
             "js_runtimes": {"node": {}}, "cachedir": str(DATA / "extractor-cache")}
     cookiefile = DATA / "cookies.txt"
     # yt-dlp updates the cookie jar. Serialize use with imports/deletion.
     with _lock:
+        cached = _urls.get(key)
+        if not fresh and cached and cached[0] > time.monotonic():
+            return cached[1]
         if cookiefile.is_file():
             opts["cookiefile"] = str(cookiefile)
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -389,7 +395,54 @@ def resolve_sync(raw: str, fresh: bool = False) -> dict:
             "album": info.get("album") or "", "duration_s": info.get("duration") or 0,
             "cover_url": info.get("thumbnail") or "", "ext": item["ext"], "lyric": ""})
         _metadata["youtube:" + vid]["ext"] = item["ext"]
+        _metadata["youtube:" + vid]["audio_spec"] = {
+            "bitrate": int(float(info["abr"]) * 1000) if info.get("abr") else None,
+            "sampleRate": info.get("asr"), "channel": info.get("audio_channels"),
+            "codec": info.get("acodec"), "bitDepth": None}
         return item
+
+
+def lyrics_sync(raw: str) -> dict:
+    vid = video_id(raw)
+    cached = _lyric_cache.get(vid)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+    with _session() as session:
+        music = client(session, use_oauth=False)
+        tab = music.get_watch_playlist(videoId=vid, limit=1).get("lyrics")
+        data = None
+        if tab:
+            try:
+                data = music.get_lyrics(tab, timestamps=True)
+            except (YTMusicError, requests.RequestException):
+                data = music.get_lyrics(tab, timestamps=False)
+        text = ""
+        if data:
+            if data.get("hasTimestamps"):
+                lines = []
+                for line in data.get("lyrics", []):
+                    ms = line.get("start_time", 0) if isinstance(line, dict) else line.start_time
+                    lyric = line.get("text", "") if isinstance(line, dict) else line.text
+                    seconds = max(0, ms) / 1000
+                    lines.append(f"[{int(seconds // 60):02d}:{seconds % 60:05.2f}]{lyric}")
+                text = "\n".join(lines)
+            else:
+                text = str(data.get("lyrics") or "")
+        result = {"ok": True, "lyric": text, "timed": bool(data and data.get("hasTimestamps"))}
+        if len(_lyric_cache) > 300:
+            _lyric_cache.clear()
+        _lyric_cache[vid] = (time.monotonic() + (3600 if text else 300), result)
+        return result
+
+
+@app.get("/lyrics")
+async def lyrics(id: str):
+    try:
+        return await asyncio.to_thread(lyrics_sync, id)
+    except ValueError:
+        raise HTTPException(400, "Invalid video ID")
+    except Exception:
+        raise HTTPException(502, "Lyrics provider unavailable")
 
 
 @app.get("/healthz")
@@ -403,6 +456,13 @@ async def search(keyword: str = Query(min_length=1, max_length=200), limit: int 
     try:
         async with _jobs:
             items = await asyncio.to_thread(search_sync, keyword, limit)
+        if items:
+            async def warm_first():
+                try:
+                    await asyncio.to_thread(resolve_sync, items[0]["id"])
+                except Exception:
+                    pass
+            asyncio.create_task(warm_first())
         return {"ok": True, "items": items, "catalog_mode": _catalog_mode}
     except Exception:
         raise HTTPException(502, "YouTube Music search unavailable; check network and account session")

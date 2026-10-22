@@ -1,7 +1,7 @@
 # YouTube Music 分支
 
 基于 javycoder/fnos_music_ext 2.10.0。保留原 MIT 许可证与上游接管模型。
-源码维护分支：`codex/youtube-music`，FPK 显示版本为 `2.10.0-3`。
+源码维护分支：`codex/youtube-music`，FPK 显示版本为 `2.10.0-4`。
 
 ## 使用
 
@@ -21,9 +21,9 @@ YouTube 视频的音轨；管理页与健康接口会显示 `youtube_audio_fallb
 OAuth：配置自己的 Google Cloud 客户端 ID 和密钥（类型为“电视和输入受限设备”），
 启用 YouTube Data API v3，在管理页保存后点击开始授权，在 Google 官方页面输入设备码。
 测试状态的 Google 应用需将自己的账号加入测试用户。页面自动轮询，支持到期、拒绝和限速。
-只申请 youtube.readonly 权限，不写入或删除 Google 账号数据。
+Music 私有接口需要 youtube 范围授权；程序仅调用读取接口，不写入或删除 Google 账号数据。
 OAuth 用于 ytmusicapi 音乐账号接口，不为 yt-dlp 音频下载提供登录态。
-OAuth 已授权时曲库优先用 OAuth，Cookie 仍独立用于播放；退出 OAuth 不删除 Cookie。
+OAuth 已授权时曲库优先用 OAuth；Music 接口拒绝令牌时公开搜索回退到 Cookie，并暂缓重试十分钟。Cookie 仍独立用于播放；退出 OAuth 不删除 Cookie。
 密钥和令牌位于 sources-data/youtube/oauth.json，权限 0600，令牌自动刷新并持久化。
 页面不会回显密钥、访问令牌或刷新令牌。退出只删除本地令牌，Google 侧授权可在账号安全设置撤销。
 Google 测试应用等限制可能使刷新令牌过期，此时须重新授权。
@@ -79,3 +79,10 @@ FPK 更新沿用原应用 ID `fnmusic-ext`。升级前的 `sources-data`、配�
 参考：
 - https://github.com/yt-dlp/yt-dlp/wiki/Extractors
 - https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html
+
+## 音质、速度与歌词
+
+选择解析器能提供的最佳音频流，不再强制优先 M4A，允许原始 Opus/WebM。
+实际编码、采样率与码率由上游元数据提供；未解析时不显示固定 320k 标签。
+搜索后后台预热第一条结果，仅解析地址，不下载整首歌。冷启动仍受外部网络影响。
+歌词优先请求源站时间轴，失败时使用普通文本；没有时间轴时不会伪造逐字同步。

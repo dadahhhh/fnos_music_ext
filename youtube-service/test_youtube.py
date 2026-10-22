@@ -19,6 +19,8 @@ def isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(y, "settings", lambda: {})
     y._metadata.clear(); y._urls.clear(); y._searches.clear()
     y._oauth_pending.clear()
+    y._lyric_cache.clear()
+    monkeypatch.setattr(y, '_oauth_search_backoff', 0.0)
 
 
 def cookies(domain=".youtube.com", expires=None):
@@ -152,6 +154,25 @@ def test_public_search_uses_browser_session_when_music_rejects_oauth(monkeypatch
     monkeypatch.setattr(y, 'oauth_status_sync', lambda: {'authorized':True})
     assert y.search_sync('fixture', 2)[0]['title'] == 'Fixture'
     assert factory.call_args.kwargs == {'use_oauth':False}
+
+
+def test_lyrics_falls_back_to_plain_text_and_caches(monkeypatch):
+    music = Mock()
+    music.get_watch_playlist.return_value = {'lyrics':'MPLYfixture'}
+    music.get_lyrics.side_effect = [y.YTMusicError('Timed endpoint unavailable'), {'lyrics':'fixture text', 'hasTimestamps':False}]
+    monkeypatch.setattr(y, 'client', Mock(return_value=music))
+    assert y.lyrics_sync('youtube:abcdefghijk')['lyric'] == 'fixture text'
+    assert y.lyrics_sync('youtube:abcdefghijk')['lyric'] == 'fixture text'
+    assert music.get_watch_playlist.call_count == 1
+    assert music.get_lyrics.call_args.kwargs == {'timestamps':False}
+
+
+def test_timed_lyrics_preserve_real_timestamps(monkeypatch):
+    music = Mock()
+    music.get_watch_playlist.return_value = {'lyrics':'MPLYfixture'}
+    music.get_lyrics.return_value = {'lyrics':[{'start_time':92340,'text':'fixture'}], 'hasTimestamps':True}
+    monkeypatch.setattr(y, 'client', Mock(return_value=music))
+    assert y.lyrics_sync('youtube:abcdefghijk')['lyric'] == '[01:32.34]fixture'
 
 
 def test_oauth_device_flow_refresh_and_logout(monkeypatch):

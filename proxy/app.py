@@ -1573,7 +1573,7 @@ def build_online_track(item: dict, mark_source: bool = False) -> dict:
         "channel": 2,
         "sampleRate": 44100,
         "bitDepth": 16 if play_format in ("wav", "flac", "aiff") else None,
-        "bitrate": 1411000 if play_format in ("flac", "wav", "ape", "wv") else 320000,
+        "bitrate": (None if src == "youtube" else 1411000 if play_format in ("flac", "wav", "ape", "wv") else 320000),
     }
     if "audio_spec" in item:
         for key in ("channel", "sampleRate", "bitDepth", "bitrate"):
@@ -2508,6 +2508,18 @@ async def cache_lyrics_from_musicdl(musicdl_client: httpx.AsyncClient, guid: str
 
 async def resolve_online_lyric(request: Request, guid: str) -> str:
     if source_from_online_guid(guid) == "youtube":
+        cached = read_lyric_cache(guid)
+        if cached:
+            return cached
+        try:
+            response = await get_youtube_client(request.app).get("/lyrics", params={"id": song_id_from_online_guid(guid)}, timeout=25)
+            if response.status_code == 200:
+                text = str(response.json().get("lyric") or "")
+                if text:
+                    write_lyric_cache(guid, text)
+                return text
+        except httpx.HTTPError:
+            pass
         return ""
     """本地 .lrc 优先；没有再向源站要，拿到就落盘。"""
     cached = read_lyric_cache(guid)
@@ -2555,6 +2567,8 @@ async def resolve_online_lyric(request: Request, guid: str) -> str:
 
 
 def media_type_for_ext(ext: str) -> str:
+    if ext.lower() == "webm":
+        return "audio/webm"
     return {
         "mp3": "audio/mpeg",
         "flac": "audio/flac",
