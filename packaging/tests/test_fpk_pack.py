@@ -83,7 +83,7 @@ class TestManifest:
             f"VERSION 必须是 x.y.z（自动迭代可加单字母后缀），当前为 {repo_version!r}"
         expected = re.match(r"\d+\.\d+\.\d+", repo_version).group()
         if "-youtube." in repo_version:
-            expected += "-1"
+            expected += "-" + repo_version.rsplit(".", 1)[1]
         assert m["version"] == expected
         assert re.fullmatch(r"\d+\.\d+\.\d+(?:-\d+)?", m["version"])
 

@@ -1,7 +1,7 @@
 # YouTube Music 分支
 
 基于 javycoder/fnos_music_ext 2.10.0。保留原 MIT 许可证与上游接管模型。
-源码维护分支：`codex/youtube-music`，FPK 显示版本为 `2.10.0-1`。
+源码维护分支：`codex/youtube-music`，FPK 显示版本为 `2.10.0-2`。
 
 ## 使用
 
@@ -16,7 +16,19 @@ YouTube 视频的音轨；管理页与健康接口会显示 `youtube_audio_fallb
 
 ## 登录
 
-公开内容默认无需登录。账户内容可导入专用 Netscape cookies.txt：
+公开内容默认无需登录。管理页支持两种用途不同的认证：
+
+OAuth：配置自己的 Google Cloud 客户端 ID 和密钥（类型为“电视和输入受限设备”），
+启用 YouTube Data API v3，在管理页保存后点击开始授权，在 Google 官方页面输入设备码。
+测试状态的 Google 应用需将自己的账号加入测试用户。页面自动轮询，支持到期、拒绝和限速。
+只申请 youtube.readonly 权限，不写入或删除 Google 账号数据。
+OAuth 用于 ytmusicapi 音乐账号接口，不为 yt-dlp 音频下载提供登录态。
+OAuth 已授权时曲库优先用 OAuth，Cookie 仍独立用于播放；退出 OAuth 不删除 Cookie。
+密钥和令牌位于 sources-data/youtube/oauth.json，权限 0600，令牌自动刷新并持久化。
+页面不会回显密钥、访问令牌或刷新令牌。退出只删除本地令牌，Google 侧授权可在账号安全设置撤销。
+Google 测试应用等限制可能使刷新令牌过期，此时须重新授权。
+
+需要播放账号限制内容时，可导入专用 Netscape cookies.txt：
 
 1. 使用独立无痕窗口登录 YouTube。
 2. 在同一个标签页打开 `https://www.youtube.com/robots.txt`。
@@ -29,7 +41,7 @@ YouTube 视频的音轨；管理页与健康接口会显示 `youtube_audio_fallb
 导入成功只表示文件已保存；实际有效性以搜索、播放为准。
 Google 可能撤销会话，不能承诺永久登录。
 
-yt-dlp 不支持 YouTube OAuth 播放认证，因此不采用会误导用户的设备码登录。
+yt-dlp 不支持 YouTube OAuth 播放认证，设备码授权不能替代播放所需的 Cookie。
 如源站要求额外验证或 PO Token，应先更新维护组件或重新导入有效会话，
 不要对外暴露 Google 账号或尝试关闭 TLS 校验。
 

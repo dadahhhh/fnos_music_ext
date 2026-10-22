@@ -83,11 +83,22 @@
         <!-- musicbox：扫码登录 -->
         <div class="card" id="panel-youtube" hidden>
           <div class="card-title">YouTube Music</div>
-          <p>默认免登录。需要账户时，导入仅包含 youtube.com 的 Netscape cookies.txt；无需输入 Google 密码。登录可能过期，可随时替换。</p>
+          <p>公开内容默认免登录。OAuth 用于 YouTube Music 账号接口；音频播放使用独立解析器，账号限制内容仍可能需要下方 Cookie 会话。</p>
           <p class="hint">优先检索 YouTube Music 歌曲；匿名曲库不可用时回退至 YouTube 音频搜索。不会生成无损音质或绕过账号权益。</p>
           <label>此音源专用代理（留空直连）<input type="password" id="youtube-proxy" autocomplete="off" placeholder="http://代理地址:端口"></label>
           <p class="hint">代理随保存按钮生效，仅影响 YouTube 请求，不改系统代理。音频品质取决于源站及账号权益。</p>
           <p id="youtube-status" class="muted">未读取会话状态</p>
+          <h3>OAuth 设备码登录</h3>
+          <p class="hint">填写你自己的 Google Cloud OAuth 客户端，类型选“电视和输入受限设备”，启用 YouTube Data API v3。若应用处于测试状态，请将自己的账号加入测试用户。</p>
+          <label>Google 客户端 ID <input type="text" id="youtube-oauth-client" autocomplete="off" placeholder="…apps.googleusercontent.com"></label>
+          <label>客户端密钥 <input type="password" id="youtube-oauth-secret" autocomplete="new-password" placeholder="已保存后留空可保留原密钥"></label>
+          <button type="button" id="youtube-oauth-save">保存 OAuth 客户端</button>
+          <button type="button" id="youtube-oauth-start">开始 Google 授权</button>
+          <button type="button" id="youtube-oauth-logout">退出 OAuth</button>
+          <p id="youtube-oauth-status" class="muted">未读取 OAuth 状态</p>
+          <p id="youtube-oauth-device" hidden>在 <a href="https://www.google.com/device" target="_blank" rel="noopener noreferrer">Google 授权页面</a> 输入设备码：<strong id="youtube-oauth-code"></strong>。授权后页面会自动检查结果。</p>
+          <p class="hint">密钥和可刷新的令牌仅保存在飞牛本地，不回显给浏览器。退出会删除本地令牌；可在 Google 账号安全设置中撤销授权。</p>
+          <h3>浏览器 Cookie 会话（播放认证）</h3>
           <label>导入会话文件 <input type="file" id="youtube-cookies" accept=".txt"></label>
           <button type="button" id="youtube-import">导入 / 替换会话</button> <button type="button" id="youtube-logout">清除会话</button>
           <p class="hint">导出：无痕窗口登录 YouTube，打开 youtube.com/robots.txt，导出该站点 Cookie 后关闭整个无痕窗口。文件仅存本机，不回显。公开内容可先不导入。</p>

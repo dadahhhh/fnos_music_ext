@@ -76,6 +76,33 @@ def authed_client():
         yield client
 
 
+@pytest.mark.asyncio
+async def test_youtube_management_csrf_survives_nas_host_rewrite(tmp_path, monkeypatch):
+    monkeypatch.setitem(webui.CONF, 'repo_dir', str(tmp_path))
+    monkeypatch.delenv('XDG_DATA_HOME', raising=False)
+    data = tmp_path / 'sources-data' / 'youtube'
+    data.mkdir(parents=True)
+    (data / 'management.key').write_text('private-management-key')
+    calls = []
+    async def backend(req):
+        calls.append(req)
+        assert req.headers['x-youtube-manage-key'] == 'private-management-key'
+        return httpx.Response(200, json={'ok': True})
+    upstream = httpx.AsyncClient(transport=httpx.MockTransport(backend))
+    monkeypatch.setattr(webui, 'get_http', lambda request: upstream)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=webui.app), base_url='http://internal:8774', headers={'X-Trim-Isadmin':'true'}) as c:
+        for path, method in (('/api/youtube/auth','PUT'),('/api/youtube/oauth','POST')):
+            assert (await c.request(method,path,json={})).status_code == 403
+            h = {'Origin':'https://192.168.31.76:8443','X-Fnmusic-Manage':'1','Sec-Fetch-Site':'same-origin'}
+            assert (await c.request(method,path,headers=h,json={})).status_code == 200
+            h['Sec-Fetch-Site'] = 'cross-site'
+            assert (await c.request(method,path,headers=h,json={})).status_code == 403
+            assert (await c.request(method,path,headers={'X-Fnmusic-Manage':'1','Sec-Fetch-Site':'same-site'},json={})).status_code == 403
+        assert calls[-1].url.path == '/oauth'
+        assert (await c.get('/api/youtube/oauth',headers={'X-Trim-Isadmin':'false'})).status_code == 403
+    await upstream.aclose()
+
+
 @pytest.fixture
 def svctl(monkeypatch):
     calls: list[tuple] = []

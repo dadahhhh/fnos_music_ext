@@ -18,6 +18,7 @@ def isolate(tmp_path, monkeypatch):
     monkeypatch.setattr(y, "DATA", tmp_path / "youtube")
     monkeypatch.setattr(y, "settings", lambda: {})
     y._metadata.clear(); y._urls.clear(); y._searches.clear()
+    y._oauth_pending.clear()
 
 
 def cookies(domain=".youtube.com", expires=None):
@@ -141,3 +142,74 @@ def test_nonempty_music_catalog_keeps_primary_results(monkeypatch):
     monkeypatch.setattr(y, "search_youtube_sync", lambda *args: pytest.fail("unnecessary fallback"))
     assert y.search_sync("fixture", 5)[0]["id"] == "youtube:abcdefghijk"
     assert y._catalog_mode == "youtube_music"
+
+
+def test_oauth_device_flow_refresh_and_logout(monkeypatch):
+    cid = 'fixture.apps.googleusercontent.com'
+    secret = 'fixture-client-secret'
+    y.oauth_action('config', {'client_id': cid, 'client_secret': secret})
+    responses = [
+        {'device_code': 'private-device-code', 'user_code': 'ABCD-EFGH', 'expires_in': 600, 'interval': 5},
+        {'error': 'authorization_pending'},
+        {'error': 'slow_down'},
+        {'access_token': 'private-access', 'refresh_token': 'private-refresh', 'expires_in': 3600},
+        {'access_token': 'private-refreshed', 'expires_in': 3600},
+    ]
+    calls = []
+    def post(session, endpoint, data):
+        calls.append((endpoint, data))
+        return responses.pop(0)
+    monkeypatch.setattr(y, 'google_post', post)
+    r = y.oauth_action('start', {})
+    assert r['pending'] and r['user_code'] == 'ABCD-EFGH'
+    assert 'private-device-code' not in json.dumps(r) and secret not in json.dumps(r)
+    assert y.oauth_action('poll', {})['pending']
+    y.oauth_action('poll', {})  # no request before the server's next allowed poll
+    assert len(calls) == 2
+    y._oauth_pending['next_poll'] = 0
+    assert y.oauth_action('poll', {})['interval'] == 10
+    y._oauth_pending['next_poll'] = 0
+    r = y.oauth_action('poll', {})
+    assert r['authorized'] and not r['pending']
+    assert all(s not in json.dumps(r) for s in (secret, 'private-access', 'private-refresh'))
+    config = y.oauth_read(); config['token']['expires_at'] = 0; y.oauth_write(config)
+    with y._session() as session:
+        token, creds = y.oauth_token(session)
+    assert token['access_token'] == 'private-refreshed'
+    assert y.oauth_read()['token']['access_token'] == 'private-refreshed'
+    assert calls[-1][1]['grant_type'] == 'refresh_token'
+    y.atomic_private(y.DATA / 'cookies.txt', cookies())
+    assert not y.oauth_action('logout', {})['authorized']
+    assert y.DATA.joinpath('cookies.txt').exists()
+    assert y.oauth_status_sync()['client_configured']
+
+
+def test_oauth_config_change_clears_token_but_empty_secret_preserves_client():
+    y.oauth_write({'client_id':'one.apps.googleusercontent.com', 'client_secret':'secret', 'token':{'refresh_token':'refresh'}})
+    y.oauth_action('config', {'client_id':'one.apps.googleusercontent.com', 'client_secret':''})
+    assert y.oauth_status_sync()['authorized']
+    y.oauth_action('config', {'client_id':'two.apps.googleusercontent.com', 'client_secret':'new-secret'})
+    assert not y.oauth_status_sync()['authorized']
+    with pytest.raises(ValueError):
+        y.oauth_action('config', {'client_id':'evil.test', 'client_secret':'secret'})
+
+
+def test_oauth_expiry_and_google_denial(monkeypatch):
+    y.oauth_write({'client_id':'one.apps.googleusercontent.com', 'client_secret':'secret'})
+    y._oauth_pending.update(expires_at=1)
+    with pytest.raises(ValueError): y.oauth_action('poll', {})
+    assert not y._oauth_pending
+    y._oauth_pending.update(expires_at=time.time()+60, device_code='private', interval=5)
+    monkeypatch.setattr(y, 'google_post', lambda *a: {'error':'access_denied'})
+    with pytest.raises(ValueError): y.oauth_action('poll', {})
+    assert not y.oauth_status_sync()['pending']
+
+
+@pytest.mark.asyncio
+async def test_oauth_management_never_returns_or_logs_upstream_secrets(monkeypatch):
+    def fail(*args): raise RuntimeError('private-token private-client-secret')
+    monkeypatch.setattr(y, 'oauth_action', fail)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=y.app), base_url='http://test') as c:
+        assert (await c.post('/oauth', json={'action':'start'})).status_code == 403
+        r = await c.post('/oauth', headers={'X-Youtube-Manage-Key':y.management_key()}, json={'action':'start'})
+        assert r.status_code == 502 and 'private-' not in r.text

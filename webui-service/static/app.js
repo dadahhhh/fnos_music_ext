@@ -1927,7 +1927,47 @@ window.addEventListener("keydown", (ev) => {
 })();
 
 // YouTube credentials never enter the general config response or localStorage.
+let youtubeOAuthTimer = null;
+let youtubeOAuthBusy = false;
+function renderYoutubeOAuth(r) {
+  clearTimeout(youtubeOAuthTimer);
+  if (!$('#youtube-oauth-client').matches(':focus')) $('#youtube-oauth-client').value = r.client_id || '';
+  $('#youtube-oauth-status').textContent = r.authorized ? 'OAuth 已授权 · 令牌到期时自动刷新' : r.client_configured ? '客户端已保存，等待授权' : '请先配置自己的 Google OAuth 客户端';
+  $('#youtube-oauth-device').hidden = !r.pending;
+  $('#youtube-oauth-code').textContent = r.pending ? r.user_code : '';
+  if (r.pending) {
+    $('#youtube-oauth-status').textContent = '等待 Google 授权，设备码将在 ' + new Date(r.device_expires_at * 1000).toLocaleTimeString() + ' 到期';
+    youtubeOAuthTimer = setTimeout(() => youtubeOAuthAction('poll'), Math.max(5, r.interval || 5) * 1000);
+  }
+}
+async function youtubeOAuthStatus() {
+  try { renderYoutubeOAuth(await api('/api/youtube/oauth')); }
+  catch (e) { $('#youtube-oauth-status').textContent = e.message; }
+}
+async function youtubeOAuthAction(action) {
+  if (youtubeOAuthBusy) return;
+  youtubeOAuthBusy = true;
+  clearTimeout(youtubeOAuthTimer);
+  try {
+    const body = {action};
+    if (action === 'config') {
+      body.client_id = $('#youtube-oauth-client').value.trim();
+      body.client_secret = $('#youtube-oauth-secret').value.trim();
+    }
+    const r = await api('/api/youtube/oauth', {method:'POST', headers:{'Content-Type':'application/json', 'X-Fnmusic-Manage':'1'}, body:JSON.stringify(body)});
+    if (action === 'config') $('#youtube-oauth-secret').value = '';
+    renderYoutubeOAuth(r);
+    if (action !== 'poll') toast(action === 'logout' ? '本地 OAuth 令牌已清除' : action === 'config' ? '客户端已保存，仅存飞牛本地' : '请打开 Google 授权页面并输入设备码');
+    if (action === 'poll' && r.authorized && !r.pending) toast('Google OAuth 授权成功');
+  } catch (e) { $('#youtube-oauth-status').textContent = e.message; }
+  finally { youtubeOAuthBusy = false; }
+}
+$('#youtube-oauth-save').addEventListener('click', () => youtubeOAuthAction('config'));
+$('#youtube-oauth-start').addEventListener('click', () => youtubeOAuthAction('start'));
+$('#youtube-oauth-logout').addEventListener('click', () => youtubeOAuthAction('logout'));
+
 async function youtubeStatus() {
+  youtubeOAuthStatus();
   try {
     const r = await api('/api/youtube/auth');
     $('#youtube-status').textContent = (r.configured ? '已保存专用浏览器会话（有效性以实际播放为准）' : '免登录模式') + ' · yt-dlp ' + r.extractor_version + (r.catalog_mode === 'youtube_audio_fallback' ? ' · 当前使用 YouTube 音频搜索回退' : '');
@@ -1938,11 +1978,11 @@ $('#youtube-import').addEventListener('click', async () => {
   const f = $('#youtube-cookies').files[0];
   if (!f || f.size > 262144) { toast('请选择不超过 256 KiB 的 cookies.txt', 'fail'); return; }
   try {
-    await api('/api/youtube/auth', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({cookies: await f.text()}) });
+    await api('/api/youtube/auth', { method: 'PUT', headers: {'Content-Type':'application/json', 'X-Fnmusic-Manage':'1'}, body: JSON.stringify({cookies: await f.text()}) });
     $('#youtube-cookies').value = ''; await youtubeStatus(); toast('会话已保存，仅存飞牛本地');
   } catch(e) { toast(e.message, 'fail'); }
 });
 $('#youtube-logout').addEventListener('click', async () => {
-  try { await api('/api/youtube/auth', {method:'DELETE'}); await youtubeStatus(); toast('会话已清除'); }
+  try { await api('/api/youtube/auth', {method:'DELETE', headers:{'X-Fnmusic-Manage':'1'}}); await youtubeStatus(); toast('会话已清除'); }
   catch(e) { toast(e.message, 'fail'); }
 });

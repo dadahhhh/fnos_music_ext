@@ -23,7 +23,7 @@ import httpx
 import requests
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from ytmusicapi import YTMusic
+from ytmusicapi import YTMusic, OAuthCredentials
 import yt_dlp
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,6 +42,130 @@ _metadata: dict[str, dict] = {}
 _urls: dict[str, tuple[float, dict]] = {}
 _searches: dict[str, tuple[float, list]] = {}
 _catalog_mode = "youtube_music"
+_oauth_lock = threading.RLock()
+_oauth_pending: dict = {}
+
+
+def oauth_read() -> dict:
+    path = DATA / "oauth.json"
+    return json.loads(path.read_text()) if path.is_file() else {}
+
+
+def oauth_write(value: dict):
+    atomic_private(DATA / "oauth.json", json.dumps(value))
+
+
+def google_post(session, endpoint: str, data: dict) -> dict:
+    # Both endpoints are fixed; never accept a token/verification URL from users.
+    response = session.post("https://oauth2.googleapis.com/" + endpoint, data=data)
+    result = response.json()
+    if not isinstance(result, dict):
+        raise ValueError("Invalid OAuth response")
+    if response.status_code >= 400 and not result.get("error"):
+        raise ValueError("OAuth request failed")
+    return result
+
+
+def oauth_status_sync() -> dict:
+    with _oauth_lock:
+        config = oauth_read()
+        pending = _oauth_pending if _oauth_pending.get("expires_at", 0) > time.time() else {}
+        return {"ok": True, "client_id": config.get("client_id", ""),
+                "client_configured": bool(config.get("client_id") and config.get("client_secret")),
+                "authorized": bool(config.get("token", {}).get("refresh_token")),
+                "expires_at": config.get("token", {}).get("expires_at"),
+                "pending": bool(pending), "user_code": pending.get("user_code"),
+                "verification_url": "https://www.google.com/device" if pending else None,
+                "interval": pending.get("interval", 5),
+                "device_expires_at": pending.get("expires_at"),
+                "playback_requires_cookies": True}
+
+
+def oauth_token(session):
+    with _oauth_lock:
+        config = oauth_read()
+        token = config.get("token")
+        if not token:
+            return None
+        if token.get("expires_at", 0) < time.time() + 120:
+            result = google_post(session, "token", {"client_id": config["client_id"],
+                "client_secret": config["client_secret"], "grant_type": "refresh_token",
+                "refresh_token": token["refresh_token"]})
+            if not result.get("access_token"):
+                raise ValueError("OAuth refresh failed; authorize again")
+            token.update({k: result[k] for k in ("access_token", "refresh_token", "scope", "token_type", "expires_in") if k in result})
+            token["expires_at"] = int(time.time()) + int(result["expires_in"])
+            oauth_write(config)
+        return dict(token), OAuthCredentials(config["client_id"], config["client_secret"], session=session)
+
+
+def oauth_action(action: str, values: dict) -> dict:
+    with _oauth_lock:
+        config = oauth_read()
+        if action == "config":
+            client_id = str(values.get("client_id", "")).strip()
+            secret = str(values.get("client_secret", "")).strip()
+            if not client_id.endswith(".apps.googleusercontent.com") or len(client_id) > 512:
+                raise ValueError("Use a Google TV / limited-input-device client ID")
+            if not secret and client_id == config.get("client_id"):
+                secret = config.get("client_secret", "")
+            if not secret or len(secret) > 1024 or any(c in secret + client_id for c in "\r\n\x00"):
+                raise ValueError("Client ID and secret are required")
+            if (client_id, secret) != (config.get("client_id"), config.get("client_secret")):
+                config = {"client_id": client_id, "client_secret": secret}
+                oauth_write(config)
+                _oauth_pending.clear()
+        elif action == "logout":
+            # Forget local tokens; revocation remains available in Google Account.
+            config.pop("token", None)
+            oauth_write(config)
+            _oauth_pending.clear()
+        elif action == "start":
+            if not config.get("client_id") or not config.get("client_secret"):
+                raise ValueError("Configure your Google OAuth client first")
+            with _session() as session:
+                result = google_post(session, "device/code", {"client_id": config["client_id"],
+                    "scope": "https://www.googleapis.com/auth/youtube.readonly"})
+            if not all(result.get(k) for k in ("device_code", "user_code", "expires_in")):
+                raise ValueError("Google rejected the device request; check client type and API configuration")
+            _oauth_pending.clear()
+            _oauth_pending.update(device_code=result["device_code"], user_code=result["user_code"],
+                expires_at=time.time() + min(int(result["expires_in"]), 1800),
+                interval=max(5, int(result.get("interval", 5))), next_poll=0)
+        elif action == "poll":
+            if _oauth_pending.get("expires_at", 0) <= time.time():
+                _oauth_pending.clear()
+                raise ValueError("Device code expired; start authorization again")
+            if time.monotonic() < _oauth_pending.get("next_poll", 0):
+                return oauth_status_sync()
+            _oauth_pending["next_poll"] = time.monotonic() + _oauth_pending["interval"]
+            with _session() as session:
+                result = google_post(session, "token", {"client_id": config["client_id"],
+                    "client_secret": config["client_secret"], "device_code": _oauth_pending["device_code"],
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code"})
+            error = result.get("error")
+            if error == "slow_down":
+                _oauth_pending["interval"] += 5
+                _oauth_pending["next_poll"] = time.monotonic() + _oauth_pending["interval"]
+            elif error == "authorization_pending":
+                pass
+            elif error:
+                _oauth_pending.clear()
+                raise ValueError("Google declined authorization or the device code expired")
+            else:
+                if not all(result.get(k) for k in ("access_token", "refresh_token", "expires_in")):
+                    raise ValueError("Incomplete OAuth token response")
+                config["token"] = {k: result[k] for k in ("access_token", "refresh_token", "expires_in", "token_type", "scope") if k in result}
+                config["token"].setdefault("scope", "https://www.googleapis.com/auth/youtube.readonly")
+                config["token"].setdefault("token_type", "Bearer")
+                config["token"]["expires_at"] = int(time.time()) + int(result["expires_in"])
+                oauth_write(config)
+                _oauth_pending.clear()
+        else:
+            raise ValueError("Unknown OAuth action")
+        with _lock:
+            _searches.clear()
+        return oauth_status_sync()
 
 
 def settings() -> dict:
@@ -108,6 +232,10 @@ def _session() -> requests.Session:
 
 
 def client(session: requests.Session) -> YTMusic:
+    oauth = oauth_token(session)
+    if oauth:
+        auth, credentials = oauth
+        return YTMusic(auth=auth, oauth_credentials=credentials, requests_session=session)
     path = DATA / "cookies.txt"
     auth = None
     if path.is_file():
@@ -360,6 +488,27 @@ async def auth_status(request: Request):
             "updated_at": path.stat().st_mtime if path.is_file() else None,
             "catalog_mode": _catalog_mode,
             "extractor_version": yt_dlp.version.__version__}
+
+
+@app.api_route("/oauth", methods=["GET", "POST"])
+async def oauth_manage(request: Request):
+    authorize(request)
+    if request.method == "GET":
+        return await asyncio.to_thread(oauth_status_sync)
+    raw = await request.body()
+    if len(raw) > 8192:
+        raise HTTPException(413, "OAuth request too large")
+    try:
+        values = json.loads(raw)
+        if not isinstance(values, dict):
+            raise ValueError("Expected an object")
+        return await asyncio.to_thread(oauth_action, values.get("action", ""), values)
+    except ValueError as exc:
+        # All our ValueErrors are fixed messages, but upstream JSON errors must
+        # never expose a response, secret or token.
+        raise HTTPException(400, "OAuth operation failed; check client settings, device expiry and Google consent") from None
+    except Exception:
+        raise HTTPException(502, "Google OAuth unavailable; check this source's network connection") from None
 
 
 @app.put("/auth")

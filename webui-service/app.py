@@ -954,15 +954,18 @@ app = FastAPI(title="fnmusic-webui", version=SERVICE_VERSION, lifespan=_lifespan
 
 
 @app.api_route("/api/youtube/auth", methods=["GET", "PUT", "DELETE"])
+@app.api_route("/api/youtube/oauth", methods=["GET", "POST"])
 async def youtube_auth(request: Request):
     """Management only: NAS administrator, bounded body, fixed upstream path."""
     if not _is_admin(_header_map(request.scope)):
         raise HTTPException(403, "Administrator required")
     if request.method != "GET":
-        origin = request.headers.get("origin")
-        host = request.headers.get("host", "")
-        from urllib.parse import urlsplit
-        if origin and urlsplit(origin).netloc != host:
+        # fnOS rewrites Host while proxying this iframe. A required custom
+        # header is a CSRF boundary: cross-origin scripts require a CORS
+        # preflight (which this application does not allow), forms cannot set
+        # it. Fetch Metadata additionally rejects cross-origin browser calls.
+        if (request.headers.get("x-fnmusic-manage") != "1"
+                or request.headers.get("sec-fetch-site", "same-origin") not in ("same-origin", "none")):
             raise HTTPException(403, "Cross-origin request denied")
     body = await request.body()
     if len(body) > 300000:
@@ -973,9 +976,10 @@ async def youtube_auth(request: Request):
     if not key_path.exists():
         raise HTTPException(503, "YouTube service not ready; select it for preview first")
     try:
-        resp = await get_http(request).request(request.method, CONF["youtube_url"] + "/auth",
+        endpoint = "/oauth" if request.url.path.endswith("/oauth") else "/auth"
+        resp = await get_http(request).request(request.method, CONF["youtube_url"] + endpoint,
             content=body, headers={"X-Youtube-Manage-Key": key_path.read_text().strip(),
-                                   "Content-Type": "application/json"}, timeout=10)
+                                   "Content-Type": "application/json"}, timeout=25)
         return JSONResponse(_resp_json(resp), status_code=resp.status_code,
                             headers={"Cache-Control": "no-store"})
     except httpx.HTTPError:
