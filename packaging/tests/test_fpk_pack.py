@@ -28,6 +28,22 @@ APPNAME = "fnmusic-ext"
 ENTRY_ID = "fnmusic-ext.main"
 
 
+@pytest.mark.parametrize('source,key', [('youtube','FNMUSIC_YOUTUBE_ENABLED'), ('lxmusic','FNMUSIC_LX_ENABLED'), ('musicbox','FNMUSIC_NETEASE_ENABLED')])
+@pytest.mark.parametrize('value', ['true', "'true'", '"true"'])
+def test_upgrade_preserves_source_from_quoted_dotenv(tmp_path, source, key, value):
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    (repo / 'install.sh').touch()
+    (repo / 'proxy').mkdir()
+    shutil.copyfile(REPO_ROOT / 'proxy' / 'env_merge.py', repo / 'proxy' / 'env_merge.py')
+    (repo / '.env').write_text(f'{key}={value}\n')
+    env = {**os.environ, 'SELF_DIR':str(FPK_DIR / 'cmd'), 'TRIM_APPDEST':str(tmp_path),
+           'FNMUSIC_DURABLE_LOG':str(tmp_path / 'durable.log'), 'TRIM_PKGVAR':str(tmp_path)}
+    r = subprocess.run(['bash','-c','. "$1"; fnmusic_saved_source','test',str(FPK_DIR / 'cmd' / '_common')],
+                       env=env, capture_output=True, text=True, check=True)
+    assert r.stdout.strip() == source, r.stderr
+
+
 def _png_size(path: Path) -> tuple[int, int]:
     data = path.read_bytes()
     assert data[:8] == b"\x89PNG\r\n\x1a\n", f"{path} 不是 PNG 文件"
@@ -323,3 +339,4 @@ class TestPayload:
         repo = stage / "app" / "repo"
         assert not list(repo.rglob("__pycache__"))
         assert not [p for p in repo.iterdir() if p.name.startswith(".venv")]
+

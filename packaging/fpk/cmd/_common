@@ -104,7 +104,16 @@ fnmusic_env_source() {
     # 0 when the selected audio source recorded in .env matches $1.
     [ -n "${FNMUSIC_REPO_DIR}" ] && [ -f "${FNMUSIC_REPO_DIR}/.env" ] || return 1
     local key="$1"
-    grep -q "^${key}=true" "${FNMUSIC_REPO_DIR}/.env" 2>/dev/null
+    # Both installer and WebUI serialize quoted dotenv values. Never source
+    # this user-editable file as shell code, and use the runtime's parser.
+    python3 - "${FNMUSIC_REPO_DIR}" "${key}" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from proxy.env_merge import parse_env_file
+values, _ = parse_env_file(Path(sys.argv[1]) / '.env')
+sys.exit(0 if str(dict(values).get(sys.argv[2], '')).strip().lower() in ('true', '1', 'yes', 'on') else 1)
+PY
 }
 
 fnmusic_saved_source() {

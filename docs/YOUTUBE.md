@@ -1,7 +1,7 @@
 # YouTube Music 分支
 
 基于 javycoder/fnos_music_ext 2.10.0。保留原 MIT 许可证与上游接管模型。
-源码维护分支：`codex/youtube-music`，FPK 显示版本为 `2.10.0-2`。
+源码维护分支：`codex/youtube-music`，FPK 显示版本为 `2.10.0-3`。
 
 ## 使用
 
