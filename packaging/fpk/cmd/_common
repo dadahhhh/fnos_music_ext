@@ -110,6 +110,7 @@ fnmusic_env_source() {
 fnmusic_saved_source() {
     # Map the flags written by install.sh back to a --sources value.
     if fnmusic_env_source FNMUSIC_NETEASE_ENABLED; then echo musicbox
+    elif fnmusic_env_source FNMUSIC_YOUTUBE_ENABLED; then echo youtube
     elif fnmusic_env_source FNMUSIC_LX_ENABLED; then echo lxmusic
     elif fnmusic_env_source FNMUSIC_MUSICDL_ENABLED; then echo musicdl
     else echo ""; fi

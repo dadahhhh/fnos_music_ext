@@ -82,7 +82,7 @@ async def test_health_concurrent_wall_clock_budget(monkeypatch):
     assert 2.3 < elapsed < 2.65
     assert len(started) == 4 and max(started) - min(started) < .1
     assert not result["ok"] and result["degraded"]
-    assert all(x["error"] == "TimeoutError" for x in result["details"].values())
+    assert all(x["error"] == "TimeoutError" for x in result["details"].values() if x["status"] != "disabled")
     for client in clients:
         await client.aclose()
 

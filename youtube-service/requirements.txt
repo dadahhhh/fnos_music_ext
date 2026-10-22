@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn>=0.29
+httpx[socks]>=0.27
+requests[socks]>=2.32
+ytmusicapi==1.12.3
+yt-dlp[default]==2026.10.21

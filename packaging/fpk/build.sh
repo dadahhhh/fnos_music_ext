@@ -108,6 +108,7 @@ rsync -a --delete \
     --exclude='online_favorites/' --exclude='online_favorites.json' \
     --exclude='playlist_tracks/' --exclude='album_registry.json' --exclude='bind_registry.json' \
     --exclude='*.fpk' \
+    --exclude='.youtube-network.json' --exclude='test-video-id.txt' \
     "${REPO_ROOT}/" "${STAGE}/app/repo/"
 
 # 注入预编译包至打包 staging 目录，实现 fpk 离线内嵌而不污染源码树
@@ -136,6 +137,7 @@ fi
 # 迭代测试构建在 VERSION/文件名上带字母后缀（如 2.2.9a），manifest 只落基础
 # 三段版本。
 MANIFEST_VER="$(echo "${VERSION}" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
+if [[ "${VERSION}" == *-youtube.* ]]; then MANIFEST_VER="${MANIFEST_VER}-1"; fi
 sed "s/@VERSION@/${MANIFEST_VER}/" "${FPK_DIR}/manifest.in" > "${STAGE}/manifest"
 cp "${FPK_DIR}/ICON.PNG" "${FPK_DIR}/ICON_256.PNG" "${STAGE}/"
 cp -a "${FPK_DIR}/app/ui/." "${STAGE}/app/ui/"

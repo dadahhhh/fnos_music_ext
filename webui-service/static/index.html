@@ -60,8 +60,9 @@
 
       <!-- 音乐源 -->
       <section class="page" id="page-source">
-        <h2>音乐源（三选一）</h2>
+        <h2>音乐源（四选一）</h2>
         <div class="provider-grid">
+          <label class="provider-card" data-provider="youtube"><input type="radio" name="provider" value="youtube"><div class="provider-head">YouTube Music</div><div class="provider-desc">官方曲库搜索，免登录试听，可导入专用浏览器会话</div></label>
           <label class="provider-card" data-provider="musicbox">
             <input type="radio" name="provider" value="musicbox">
             <div class="provider-head">网易云音乐盒子</div>
@@ -80,6 +81,17 @@
         </div>
 
         <!-- musicbox：扫码登录 -->
+        <div class="card" id="panel-youtube" hidden>
+          <div class="card-title">YouTube Music</div>
+          <p>默认免登录。需要账户时，导入仅包含 youtube.com 的 Netscape cookies.txt；无需输入 Google 密码。登录可能过期，可随时替换。</p>
+          <p class="hint">优先检索 YouTube Music 歌曲；匿名曲库不可用时回退至 YouTube 音频搜索。不会生成无损音质或绕过账号权益。</p>
+          <label>此音源专用代理（留空直连）<input type="password" id="youtube-proxy" autocomplete="off" placeholder="http://代理地址:端口"></label>
+          <p class="hint">代理随保存按钮生效，仅影响 YouTube 请求，不改系统代理。音频品质取决于源站及账号权益。</p>
+          <p id="youtube-status" class="muted">未读取会话状态</p>
+          <label>导入会话文件 <input type="file" id="youtube-cookies" accept=".txt"></label>
+          <button type="button" id="youtube-import">导入 / 替换会话</button> <button type="button" id="youtube-logout">清除会话</button>
+          <p class="hint">导出：无痕窗口登录 YouTube，打开 youtube.com/robots.txt，导出该站点 Cookie 后关闭整个无痕窗口。文件仅存本机，不回显。公开内容可先不导入。</p>
+        </div>
         <div class="subpanel" id="panel-musicbox" hidden>
           <div class="card">
             <div class="card-title">网易扫码登录</div>

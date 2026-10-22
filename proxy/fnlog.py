@@ -44,10 +44,10 @@ SNAPSHOT_FILE = "env_snapshot.txt"
 # Values are scanned below: length-limited regexes leak the tail of long secrets.
 _SECRET_ASSIGNMENT_RE = re.compile(
     r"(?<![\w.-])(?P<quote>[\"']?)(?P<key>[\w.-]*"
-    r"(?:authorization|key|token|secret|passwd|password|cookie)[\w.-]*)"
+    r"(?:authorization|key|token|secret|passwd|password|cookie|youtube_proxy)[\w.-]*)"
     r"(?P=quote)(?P<sep>\s*[=:]\s*)", re.IGNORECASE
 )
-_SECRET_ENV_KEYS = re.compile(r"(?i)authorization|key|token|secret|passwd|password|cookie")
+_SECRET_ENV_KEYS = re.compile(r"(?i)authorization|key|token|secret|passwd|password|cookie|youtube_proxy")
 
 _TRIM_MUSIC_SOCKETS = (
     "/var/run/trim_music.socket",

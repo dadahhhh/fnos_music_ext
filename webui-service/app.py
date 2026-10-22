@@ -58,6 +58,7 @@ setup_logging("webui_service", "webui")
 SERVICE_VERSION = "2.0.0"
 
 CONF = {
+    "youtube_url": os.environ.get("WEBUI_YOUTUBE_URL", "http://127.0.0.1:8006"),
     "repo_dir": os.environ.get("WEBUI_REPO_DIR", "/repo"),
     "musicdl_url": os.environ.get("WEBUI_MUSICDL_URL", "http://127.0.0.1:8001"),
     "musicbox_url": os.environ.get("WEBUI_MUSICBOX_URL", "http://127.0.0.1:8002"),
@@ -95,6 +96,7 @@ _update_cache: dict = {}
 
 # 音源进程 ↔ 启用开关（三选一互斥）
 PROVIDERS = {
+    "youtube": "FNMUSIC_YOUTUBE_ENABLED",
     "musicdl": "FNMUSIC_MUSICDL_ENABLED",
     "musicbox": "FNMUSIC_NETEASE_ENABLED",
     "lxmusic": "FNMUSIC_LX_ENABLED",
@@ -103,6 +105,8 @@ PROVIDERS = {
 # WebUI 可管理的配置键与元数据（kind/default/reload 驱动前端渲染与校验）。
 # reload: hot=proxy 热重载即生效；process=需要切换/重启对应音源进程。
 SCHEMA: dict[str, dict] = {
+    "FNMUSIC_YOUTUBE_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "YouTube Music"},
+    "YOUTUBE_PROXY": {"kind": "str", "default": "", "group": "youtube", "reload": "hot", "label": "YouTube 专用代理（留空直连）"},
     "FNMUSIC_MUSICDL_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "musicdl 聚合音源"},
     "FNMUSIC_NETEASE_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "网易云音乐盒子"},
     "FNMUSIC_LX_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "洛雪自定义源"},
@@ -224,12 +228,13 @@ def supervisor_status(*, timeout: float = 20.0) -> dict[str, dict]:
 
 
 PROVIDER_PROGRAMS = {
+    "youtube": ["youtube"],
     "musicdl": ["musicdl"],
     "musicbox": ["musicbox"],
     "lxmusic": ["lxserver", "lxmusic"],
 }
-PROVIDER_PROGRAM = {"musicdl": "musicdl", "musicbox": "musicbox", "lxmusic": "lxmusic"}  # 兼容单名引用
-PROVIDER_HEALTH = {"musicdl": CONF["musicdl_url"], "musicbox": CONF["musicbox_url"], "lxmusic": CONF["lx_url"]}
+PROVIDER_PROGRAM = {"youtube": "youtube", "musicdl": "musicdl", "musicbox": "musicbox", "lxmusic": "lxmusic"}  # 兼容单名引用
+PROVIDER_HEALTH = {"youtube": CONF["youtube_url"], "musicdl": CONF["musicdl_url"], "musicbox": CONF["musicbox_url"], "lxmusic": CONF["lx_url"]}
 
 
 def switch_provider_process(old: str, new: str, keep_musicbox: bool = False) -> list[dict]:
@@ -780,6 +785,13 @@ def _is_dir_within(child: str, parent: str) -> bool:
 
 
 def _normalize_value(key: str, raw) -> str:
+    if key == "YOUTUBE_PROXY":
+        from urllib.parse import urlsplit
+        text = str(raw or "").strip()
+        p = urlsplit(text)
+        if text and (p.scheme not in ("http", "https", "socks5", "socks5h") or not p.hostname or any(c in text for c in "\r\n\x00")):
+            raise ValueError("YouTube proxy must be a valid HTTP(S) or SOCKS5 URL")
+        return text
     if key == "LX_SOURCE_LIST":
         return _normalize_lx_source_list(raw)
     spec = SCHEMA[key]
@@ -941,6 +953,35 @@ async def _lifespan(_app: FastAPI):
 app = FastAPI(title="fnmusic-webui", version=SERVICE_VERSION, lifespan=_lifespan)
 
 
+@app.api_route("/api/youtube/auth", methods=["GET", "PUT", "DELETE"])
+async def youtube_auth(request: Request):
+    """Management only: NAS administrator, bounded body, fixed upstream path."""
+    if not _is_admin(_header_map(request.scope)):
+        raise HTTPException(403, "Administrator required")
+    if request.method != "GET":
+        origin = request.headers.get("origin")
+        host = request.headers.get("host", "")
+        from urllib.parse import urlsplit
+        if origin and urlsplit(origin).netloc != host:
+            raise HTTPException(403, "Cross-origin request denied")
+    body = await request.body()
+    if len(body) > 300000:
+        raise HTTPException(413, "Cookie file too large")
+    # Same shared volume and private directory as the source process.
+    data = Path(os.environ.get("XDG_DATA_HOME") or str(Path(CONF["repo_dir"]) / "sources-data")) / "youtube"
+    key_path = data / "management.key"
+    if not key_path.exists():
+        raise HTTPException(503, "YouTube service not ready; select it for preview first")
+    try:
+        resp = await get_http(request).request(request.method, CONF["youtube_url"] + "/auth",
+            content=body, headers={"X-Youtube-Manage-Key": key_path.read_text().strip(),
+                                   "Content-Type": "application/json"}, timeout=10)
+        return JSONResponse(_resp_json(resp), status_code=resp.status_code,
+                            headers={"Cache-Control": "no-store"})
+    except httpx.HTTPError:
+        raise HTTPException(503, "YouTube service unavailable; select it for preview first")
+
+
 def get_http(request: Request) -> httpx.AsyncClient:
     client = getattr(request.app.state, "http", None)
     if client is None:
@@ -1078,7 +1119,7 @@ async def api_status(request: Request):
     processes = supervisor_status()
     services: dict[str, dict] = {}
     for name, base in (("musicdl", CONF["musicdl_url"]), ("musicbox", CONF["musicbox_url"]),
-                       ("lxmusic", CONF["lx_url"])):
+                       ("lxmusic", CONF["lx_url"]), ("youtube", CONF["youtube_url"])):
         if name in PROVIDERS and name != provider:
             if name == "musicbox" and _resident_flag(values):
                 # 网易云歌单常驻：musicbox 非当前音源但应常驻运行，照常探活
@@ -1100,7 +1141,7 @@ async def api_status(request: Request):
         "deploy_mode": values.get("FNMUSIC_DEPLOY_MODE", "docker"),
         "current_provider": provider or "none",
         "processes": {name: processes.get(name, {"state": "UNKNOWN", "detail": ""})
-                      for name in ("musicdl", "musicbox", "lxserver", "lxmusic", "webui")},
+                      for name in ("musicdl", "musicbox", "lxserver", "lxmusic", "youtube", "webui")},
         "previews": {p: round(preview_seconds_left(p)) for p in list(_preview_until)},
         "services": services,
         "lx_source": lx_source,

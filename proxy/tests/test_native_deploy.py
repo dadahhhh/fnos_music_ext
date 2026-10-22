@@ -287,7 +287,7 @@ def test_ensure_sources_native_lxserver_provision_idempotent(tmp_path):
     shutil.copy(BASE / "container/lxserver_compat.py", repo / "container/lxserver_compat.py")
     compat = _load_module("container/lxserver_compat.py", "native_provision_compat_test")
     upstream_api = "\n".join((compat.ANCHOR_BTOA, compat.ANCHOR_CALL_OLD, compat.ANCHOR_AES_OLD))
-    for req in ("musicdl-service", "musicbox-service", "lxmusic-service", "webui-service"):
+    for req in ("musicdl-service", "musicbox-service", "lxmusic-service", "webui-service", "youtube-service"):
         (repo / req).mkdir()
         (repo / req / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
     # 预置包：zip 布局对齐真实 v2.1.2（根级 index.js 为运行入口；
@@ -364,7 +364,7 @@ def test_ensure_sources_native_rejects_bad_sha256(tmp_path):
     repo = tmp_path / "repo"
     (repo / "container" / "lxserver-artifact").mkdir(parents=True)
     shutil.copy(BASE / "ensure_sources_native.sh", repo / "ensure_sources_native.sh")
-    for req in ("musicdl-service", "musicbox-service", "lxmusic-service", "webui-service"):
+    for req in ("musicdl-service", "musicbox-service", "lxmusic-service", "webui-service", "youtube-service"):
         (repo / req).mkdir()
         (repo / req / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
     artifact = repo / "container" / "lxserver-artifact" / "lx-test-server.zip"

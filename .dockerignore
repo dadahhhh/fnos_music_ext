@@ -4,6 +4,7 @@
 !musicbox-service/
 !lxmusic-service/
 !webui-service/
+!youtube-service/
 !container/
 # webui 复用 .env 安全合并模块：只放行这两个文件（目录先放行再收窄，父目录被排除时无法重新包含）
 !proxy/

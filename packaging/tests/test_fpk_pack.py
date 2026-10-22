@@ -79,10 +79,13 @@ class TestManifest:
         repo_version = (REPO_ROOT / "VERSION").read_text().strip()
         # fnpack 只收 x.y.z：带字母后缀的自动迭代版本（2.2.9a/b/…）在 manifest
         # 落基础三段，完整版本保留在 VERSION 与产物文件名上。
-        assert re.fullmatch(r"\d+\.\d+\.\d+[a-z]?", repo_version), \
+        assert re.fullmatch(r"\d+\.\d+\.\d+(?:[a-z]|-youtube\.\d+)?", repo_version), \
             f"VERSION 必须是 x.y.z（自动迭代可加单字母后缀），当前为 {repo_version!r}"
-        assert m["version"] == re.match(r"\d+\.\d+\.\d+", repo_version).group()
-        assert re.fullmatch(r"\d+\.\d+\.\d+", m["version"])
+        expected = re.match(r"\d+\.\d+\.\d+", repo_version).group()
+        if "-youtube." in repo_version:
+            expected += "-1"
+        assert m["version"] == expected
+        assert re.fullmatch(r"\d+\.\d+\.\d+(?:-\d+)?", m["version"])
 
     def test_template_has_placeholder(self):
         assert "@VERSION@" in (FPK_DIR / "manifest.in").read_text()

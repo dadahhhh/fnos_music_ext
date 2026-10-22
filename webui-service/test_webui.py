@@ -961,7 +961,7 @@ def test_status_aggregates_processes_and_health(env_file, svctl, monkeypatch):
         # lxserver 与 lxmusic 并列出现在进程概览，便于定位洛雪链路哪一环故障
         assert rj["processes"]["lxserver"]["state"] == "STOPPED"
         assert rj["processes"]["lxmusic"]["state"] == "STOPPED"
-        assert set(rj["processes"]) == {"musicdl", "musicbox", "lxserver", "lxmusic", "webui"}
+        assert set(rj["processes"]) == {"musicdl", "musicbox", "lxserver", "lxmusic", "youtube", "webui"}
         assert rj["services"]["musicbox"]["reachable"] is True
         assert rj["services"]["lxmusic"]["note"]  # 未启用提示
         assert rj["lx_source"] is None

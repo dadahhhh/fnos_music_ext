@@ -92,4 +92,17 @@ killasgroup=true
 stdout_logfile=@RUN@/webui.log
 stdout_logfile_maxbytes=0
 redirect_stderr=true
-environment=WEBUI_REPO_DIR="@REPO@",WEBUI_MUSICDL_URL="http://127.0.0.1:8768",WEBUI_MUSICBOX_URL="http://127.0.0.1:8770",WEBUI_LX_URL="http://127.0.0.1:8772",WEBUI_SUPERVISORCTL="supervisorctl -c @RUN@/supervisord.conf"
+environment=WEBUI_REPO_DIR="@REPO@",WEBUI_MUSICDL_URL="http://127.0.0.1:8768",WEBUI_MUSICBOX_URL="http://127.0.0.1:8770",WEBUI_LX_URL="http://127.0.0.1:8772",WEBUI_YOUTUBE_URL="http://127.0.0.1:8776",WEBUI_SUPERVISORCTL="supervisorctl -c @RUN@/supervisord.conf"
+
+[program:youtube]
+directory=@REPO@/youtube-service
+command="@VENV@/bin/uvicorn" app:app --host 127.0.0.1 --port 8776
+autostart=false
+autorestart=true
+startretries=5
+stopsignal=TERM
+stopasgroup=true
+killasgroup=true
+stdout_logfile=@RUN@/youtube.log
+stdout_logfile_maxbytes=0
+redirect_stderr=true

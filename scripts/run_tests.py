@@ -25,6 +25,7 @@ PHASES = (
     {"proxy": ("proxy/tests",)},
     {
         "webui": ("webui-service",),
+        "youtube": ("youtube-service",),
         "musicdl": ("musicdl-service",),
         "lxmusic": ("lxmusic-service",),
     },

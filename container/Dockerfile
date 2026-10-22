@@ -69,6 +69,7 @@ COPY musicdl-service/requirements.txt /srv/req.musicdl
 COPY musicbox-service/requirements.txt /srv/req.musicbox
 COPY lxmusic-service/requirements.txt /srv/req.lxmusic
 COPY webui-service/requirements.txt /srv/req.webui
+COPY youtube-service/requirements.txt /srv/req.youtube
 RUN set -eu; \
     fix_dns() { \
         { \
@@ -82,6 +83,7 @@ RUN set -eu; \
     || { echo "[WARN] pip 镜像源（${PIP_INDEX_URL}）安装失败，回退官方 PyPI 重试..." >&2; \
          pip install --no-cache-dir -i https://pypi.org/simple \
             -r /srv/req.musicdl -r /srv/req.musicbox -r /srv/req.lxmusic -r /srv/req.webui; } \
+    && pip install --no-cache-dir -r /srv/req.youtube \
     && rm -f /srv/req.*
 
 RUN groupadd -g 1000 appuser \
@@ -169,6 +171,7 @@ RUN chmod 0755 /usr/local/bin/env_flag.sh /usr/local/bin/entrypoint.sh /usr/loca
 
 USER appuser
 EXPOSE 8001 8002 8003 8004
+COPY --chown=appuser:appuser youtube-service/ /srv/youtube-service/
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD ["/usr/local/bin/healthcheck.sh"]

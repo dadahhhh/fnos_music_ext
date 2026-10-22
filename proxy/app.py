@@ -111,6 +111,8 @@ def _safe_liked_number(raw: str, default: float | int, *, integer: bool = False)
 
 
 CONF = {
+    "youtube_url": os.environ.get("FNMUSIC_YOUTUBE_URL", "http://127.0.0.1:8776"),
+    "youtube_enabled": os.environ.get("FNMUSIC_YOUTUBE_ENABLED", "false").lower() in ("true", "1", "yes"),
     "musicdl_url": os.environ.get("FNMUSIC_MUSICDL_URL", "http://127.0.0.1:8768"),
     "musicbox_url": os.environ.get("FNMUSIC_MUSICBOX_URL", "http://127.0.0.1:8770"),
     "lx_url": os.environ.get("FNMUSIC_LX_URL", "http://127.0.0.1:8772"),
@@ -536,6 +538,7 @@ def _set_search_cache(keyword: str, entry: dict) -> None:
 # 新选音源立即生效。储存目录两键（FNMUSIC_TEE_SAVE_DIR/FNMUSIC_CACHE_DIR）
 # 已白名单化热重载；其余路径/端口类配置不在白名单，仍需重启。
 _ENV_WATCH_KEYS: dict[str, tuple[str, str]] = {
+    "FNMUSIC_YOUTUBE_ENABLED": ("youtube_enabled", "bool"),
     "FNMUSIC_MUSICDL_ENABLED": ("musicdl_enabled", "bool"),
     "FNMUSIC_NETEASE_ENABLED": ("netease_enabled", "bool"),
     "FNMUSIC_LX_ENABLED": ("lx_enabled", "bool"),
@@ -781,6 +784,7 @@ def _env_watch_stat(path: "str | None" = None):
 # 失效，避免旧音质配置的解析结果写回新配置下的首播。
 _LX_CONFIG_KEYS = {"lx_enabled", "lx_quality", "quality_mode", "lx_sources", "lx_source_url", "lx_source_list"}
 _SOURCE_CONF_KEYS = {
+    "youtube_enabled",
     "musicdl_enabled", "netease_enabled", "lx_enabled", "online_sources", "lx_sources",
     "lx_source_url", "lx_source_list",
 }
@@ -1049,6 +1053,8 @@ def _netease_runtime_usable() -> bool:
 
 def _source_enabled(guid: str) -> bool:
     source = source_from_online_guid(guid)
+    if source == "youtube":
+        return bool(CONF.get("youtube_enabled"))
     if source == "netease":
         if not _netease_runtime_usable():
             return False
@@ -1458,6 +1464,8 @@ def source_display_prefix(src: str, item: dict | None = None) -> str:
     """在线条目来源标记前缀：netease→[music box]，lx→逐曲 [脚本名-平台]
     （如 [墨澜-kg]；脚本无法归属落 lx，平台未知回退备注名或 [lx]），其余→[dl]。"""
     s = str(src or "").strip()
+    if s == "youtube":
+        return "[YouTube Music] "
     if s == "netease":
         return _SOURCE_TAG_NETEASE
     if s == "lx":
@@ -2499,6 +2507,8 @@ async def cache_lyrics_from_musicdl(musicdl_client: httpx.AsyncClient, guid: str
 
 
 async def resolve_online_lyric(request: Request, guid: str) -> str:
+    if source_from_online_guid(guid) == "youtube":
+        return ""
     """本地 .lrc 优先；没有再向源站要，拿到就落盘。"""
     cached = read_lyric_cache(guid)
     if cached:
@@ -2709,6 +2719,14 @@ def get_musicdl_client(fastapi_app: FastAPI) -> httpx.AsyncClient:
     if client is None:
         client = httpx.AsyncClient(base_url=CONF["musicdl_url"], timeout=45.0)
         fastapi_app.state.musicdl_client = client
+    return client
+
+
+def get_youtube_client(fastapi_app: FastAPI) -> httpx.AsyncClient:
+    client = getattr(fastapi_app.state, "youtube_client", None)
+    if client is None:
+        client = httpx.AsyncClient(base_url=CONF["youtube_url"], timeout=60.0, trust_env=False)
+        fastapi_app.state.youtube_client = client
     return client
 
 
@@ -4483,6 +4501,9 @@ async def lifespan(fastapi_app: FastAPI):
         if created_upstream and getattr(fastapi_app.state, "upstream_client", None):
             await fastapi_app.state.upstream_client.aclose()
             fastapi_app.state.upstream_client = None
+        if getattr(fastapi_app.state, "youtube_client", None):
+            await fastapi_app.state.youtube_client.aclose()
+            fastapi_app.state.youtube_client = None
         if created_musicdl and getattr(fastapi_app.state, "musicdl_client", None):
             await fastapi_app.state.musicdl_client.aclose()
             fastapi_app.state.musicdl_client = None
@@ -4556,6 +4577,7 @@ async def ext_healthz(request: Request):
 
     checks = [("upstream", True, get_upstream_client, "/music/api/v1/search/track?keyword=healthz_probe"),
               ("musicdl", CONF.get("musicdl_enabled"), get_musicdl_client, "/healthz"),
+              ("youtube", CONF.get("youtube_enabled"), get_youtube_client, "/healthz"),
               # 网易云歌单常驻：musicbox 非当前音源时仍是健康检查的一部分（issue #38）
               ("musicbox", _netease_runtime_usable(), get_musicbox_client, "/healthz"),
               ("lxmusic", CONF.get("lx_enabled"), get_lx_client, "/healthz")]
@@ -4565,7 +4587,7 @@ async def ext_healthz(request: Request):
     details.update({name: result for (name, _, _), result in zip(enabled, results)})
     statuses = {name: value["status"] for name, value in details.items()}
     failed = [name for name, status in statuses.items() if status == "fail"]
-    source_ok = any(statuses[name] == "ok" for name in ("musicdl", "musicbox", "lxmusic"))
+    source_ok = any(statuses[name] == "ok" for name in ("musicdl", "musicbox", "lxmusic", "youtube"))
     return {"ok": statuses["upstream"] == "ok" and source_ok, "version": get_version(),
             **statuses, "llm": "enabled" if dailyrec.llm_enabled() else "disabled",
             "recommend": {
@@ -4762,6 +4784,8 @@ async def _aggregate_search(request: Request, keyword: str, entry: dict) -> None
         factories.append(lambda: fetch_musicbox_search(get_musicbox_client(request.app), keyword, CONF["netease_search_limit"]))
     if CONF.get("musicdl_enabled"):
         factories.append(lambda: fetch_musicdl_search(get_musicdl_client(request.app), keyword, CONF["online_limit"]))
+    if CONF.get("youtube_enabled"):
+        factories.append(lambda: fetch_musicdl_search(get_youtube_client(request.app), keyword, CONF["online_limit"], sources=""))
     if CONF.get("lx_enabled"):
         factories.append(lambda: fetch_lx_search(get_lx_client(request.app), keyword, CONF["lx_search_limit"]))
     tasks = [asyncio.create_task(factory()) for factory in factories]
@@ -5766,6 +5790,8 @@ async def _recover_source(request: Request, guid: str, entry: dict | None) -> bo
     try:
         if source == "netease":
             coro = fetch_musicbox_search(get_musicbox_client(request.app), keyword, CONF["netease_search_limit"])
+        elif source == "youtube":
+            coro = fetch_musicdl_search(get_youtube_client(request.app), keyword, CONF["online_limit"], sources="")
         elif source == "lx":
             # 按目标 GUID 的平台精确重搜（GUID 第 3 段），对齐 musicdl 分支按引擎重搜的行为
             parts = guid.split(":")
@@ -5865,7 +5891,7 @@ async def _open_online_stream(request: Request, guid: str, range_header: str | N
             client = owned
             req = client.build_request("GET", url, headers=headers)
         else:
-            client = get_musicdl_client(request.app)
+            client = get_youtube_client(request.app) if source == "youtube" else get_musicdl_client(request.app)
             via_musicdl = True
             params = {"id": song_id_from_online_guid(guid), "proxy": "true"}
             # 无损档已被判定损坏的曲目（或上层明确要求）直接取 mp3 档；
@@ -5915,6 +5941,8 @@ async def _open_online_stream(request: Request, guid: str, range_header: str | N
         # content-type 为准修正扩展名，避免 mp3 字节按 .flac 命名入库。
         # 网易/洛雪直链相反——上游会错报 audio/mpeg，扩展名以解析结果为准。
         downgraded = (force_mp3 or _lossless_is_blacklisted(guid)) and not range_header
+        if source == "youtube":
+            ext = "webm" if "webm" in content_type else "m4a" if "mp4" in content_type else ext
         if (via_musicdl or downgraded) and "audio/mpeg" in content_type and (not ext or ext in _LOSSLESS_EXTS):
             ext = "mp3"
         elif downgraded and (not ext or ext in _LOSSLESS_EXTS):
@@ -7296,7 +7324,8 @@ async def _transcode_source(request: Request, guid: str) -> "tuple[str | None, d
             if _lossless_is_blacklisted(guid):
                 fn_diag(logger, "lossless_downgrade", guid=guid, path="transcode_source", tier="mp3")
             return str(resolved["url"]), _lx_media_headers(resolved)
-        url = f"{str(CONF['musicdl_url']).rstrip('/')}/stream?id={quote(song_id_from_online_guid(guid))}&proxy=true"
+        source_url = CONF["youtube_url"] if source == "youtube" else CONF["musicdl_url"]
+        url = f"{str(source_url).rstrip('/')}/stream?id={quote(song_id_from_online_guid(guid))}&proxy=true"
         if _lossless_is_blacklisted(guid):
             # issue #46 音质降级：无损流损坏拉黑后降级 mp3，留档实际交付格式
             fn_diag(logger, "lossless_downgrade", guid=guid, path="transcode_source", tier="mp3")
@@ -7870,7 +7899,7 @@ async def _fetch_online_info(request: Request, guid: str, include_lyric: bool = 
             logger.warning("lxmusic /info failed for %s: %s", guid, e)
         return None
 
-    musicdl_client = get_musicdl_client(request.app)
+    musicdl_client = get_youtube_client(request.app) if source_from_online_guid(guid) == "youtube" else get_musicdl_client(request.app)
     song_id = song_id_from_online_guid(guid)
     try:
         r = await musicdl_client.get("/info", params={"id": song_id}, timeout=10.0)

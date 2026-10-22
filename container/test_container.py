@@ -26,7 +26,7 @@ def supervisord_conf():
 def test_supervisord_programs_all_autostart_false(supervisord_conf):
     programs = sorted(s for s in supervisord_conf.sections() if s.startswith("program:"))
     assert programs == [
-        "program:lxmusic", "program:lxserver", "program:musicbox", "program:musicdl", "program:webui",
+        "program:lxmusic", "program:lxserver", "program:musicbox", "program:musicdl", "program:webui", "program:youtube",
     ]
     for section in programs:
         assert supervisord_conf.get(section, "autostart") == "false"
@@ -281,6 +281,7 @@ def test_compose_single_service_layout():
         "127.0.0.1:8770:8002",
         "127.0.0.1:8772:8003",
         "127.0.0.1:8774:8004",
+        "127.0.0.1:8776:8006",
     ])
     raw = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert "0.0.0.0:8770" not in raw

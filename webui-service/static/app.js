@@ -8,8 +8,8 @@ const APP_BASE = "/app/fnmusic-ext";
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const PROVIDER_LABEL = { musicdl: "musicdl 聚合音源", musicbox: "网易云音乐盒子", lxmusic: "洛雪自定义源", none: "未配置" };
-const PROC_LABEL = { musicdl: "musicdl", musicbox: "musicbox", lxserver: "lxserver", lxmusic: "lxmusic", webui: "WebUI" };
+const PROVIDER_LABEL = { youtube: "YouTube Music", musicdl: "musicdl 聚合音源", musicbox: "网易云音乐盒子", lxmusic: "洛雪自定义源", none: "未配置" };
+const PROC_LABEL = { youtube: "YouTube Music", musicdl: "musicdl", musicbox: "musicbox", lxserver: "lxserver", lxmusic: "lxmusic", webui: "WebUI" };
 
 let configValues = {};   // GET /api/config 的 values
 let configPresence = {}; // .env 显式存在的键（区分默认空与管理员清空）
@@ -252,7 +252,8 @@ async function loadConfig() {
 
 function applyConfigToForm() {
   const v = configValues;
-  const provider = v.FNMUSIC_NETEASE_ENABLED === "true" ? "musicbox"
+  $("#youtube-proxy").value = v.YOUTUBE_PROXY || "";
+  const provider = v.FNMUSIC_YOUTUBE_ENABLED === "true" ? "youtube" : v.FNMUSIC_NETEASE_ENABLED === "true" ? "musicbox"
     : v.FNMUSIC_MUSICDL_ENABLED === "true" ? "musicdl"
     : v.FNMUSIC_LX_ENABLED === "true" ? "lxmusic" : "";
   $$("input[name=provider]").forEach((el) => { el.checked = el.value === provider; });
@@ -324,6 +325,8 @@ function applyConfigToForm() {
 function collectConfig() {
   const provider = ($$("input[name=provider]").find((el) => el.checked) || {}).value || "";
   const values = {
+    FNMUSIC_YOUTUBE_ENABLED: provider === "youtube",
+    YOUTUBE_PROXY: $("#youtube-proxy").value.trim(),
     FNMUSIC_MUSICDL_ENABLED: provider === "musicdl",
     FNMUSIC_NETEASE_ENABLED: provider === "musicbox",
     FNMUSIC_LX_ENABLED: provider === "lxmusic",
@@ -462,7 +465,7 @@ $("#save-btn").addEventListener("click", saveConfig);
 /* -------------------------------------------------------------- 音源选择 */
 function savedProvider() {
   const v = configValues;
-  return v.FNMUSIC_NETEASE_ENABLED === "true" ? "musicbox"
+  return v.FNMUSIC_YOUTUBE_ENABLED === "true" ? "youtube" : v.FNMUSIC_NETEASE_ENABLED === "true" ? "musicbox"
     : v.FNMUSIC_MUSICDL_ENABLED === "true" ? "musicdl"
     : v.FNMUSIC_LX_ENABLED === "true" ? "lxmusic" : "";
 }
@@ -485,6 +488,8 @@ async function startPreview(provider) {
 
 function syncProviderPanels(provider) {
   $$(".provider-card").forEach((el) => el.classList.toggle("selected", el.dataset.provider === provider));
+  $("#panel-youtube").hidden = provider !== "youtube";
+  if (provider === "youtube") youtubeStatus();
   $("#panel-musicbox").hidden = provider !== "musicbox";
   $("#panel-musicdl").hidden = provider !== "musicdl";
   $("#panel-lxmusic").hidden = provider !== "lxmusic";
@@ -496,6 +501,7 @@ $$("input[name=provider]").forEach((el) =>
     markDirty("音源切换需保存后生效");
     if (el.value && el.value !== savedProvider() && await startPreview(el.value)) {
       if (el.value === "musicdl") await loadPlatforms(false);
+      if (el.value === "youtube") await youtubeStatus();
     }
   }));
 
@@ -1919,3 +1925,24 @@ window.addEventListener("keydown", (ev) => {
   if ($("#public-playlists-enabled").checked) await showPublicBrowser();
   setInterval(loadStatus, 15000);
 })();
+
+// YouTube credentials never enter the general config response or localStorage.
+async function youtubeStatus() {
+  try {
+    const r = await api('/api/youtube/auth');
+    $('#youtube-status').textContent = (r.configured ? '已保存专用浏览器会话（有效性以实际播放为准）' : '免登录模式') + ' · yt-dlp ' + r.extractor_version + (r.catalog_mode === 'youtube_audio_fallback' ? ' · 当前使用 YouTube 音频搜索回退' : '');
+  } catch (e) { $('#youtube-status').textContent = e.message; }
+}
+$('#youtube-proxy').addEventListener('input', () => markDirty('YouTube 网络出口已修改'));
+$('#youtube-import').addEventListener('click', async () => {
+  const f = $('#youtube-cookies').files[0];
+  if (!f || f.size > 262144) { toast('请选择不超过 256 KiB 的 cookies.txt', 'fail'); return; }
+  try {
+    await api('/api/youtube/auth', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({cookies: await f.text()}) });
+    $('#youtube-cookies').value = ''; await youtubeStatus(); toast('会话已保存，仅存飞牛本地');
+  } catch(e) { toast(e.message, 'fail'); }
+});
+$('#youtube-logout').addEventListener('click', async () => {
+  try { await api('/api/youtube/auth', {method:'DELETE'}); await youtubeStatus(); toast('会话已清除'); }
+  catch(e) { toast(e.message, 'fail'); }
+});

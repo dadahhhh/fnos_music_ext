@@ -47,6 +47,7 @@ RUN_EXTEND=0
 # --adopt: explicitly migrate the machine-wide deployment to this checkout
 # (the deployment registry otherwise refuses a second live checkout).
 ADOPT=0
+ENABLE_YOUTUBE=0
 ENABLE_MUSICDL=0
 ENABLE_MUSICBOX=0
 ENABLE_LX=0
@@ -426,7 +427,8 @@ print_featured_mdl_menu() {
 
 parse_sources() {
     local raw="${1:-}"
-    ENABLE_MUSICDL=0
+    ENABLE_YOUTUBE=0
+ENABLE_MUSICDL=0
     ENABLE_MUSICBOX=0
     ENABLE_LX=0
     LX_PLATFORMS=""
@@ -445,6 +447,8 @@ parse_sources() {
         part="${part%"${part##*[![:space:]]}"}"
         [ -z "${part}" ] && continue
         case "${part}" in
+            youtube|youtube-music|ytmusic)
+                ENABLE_YOUTUBE=1; picked+=("youtube") ;;
             musicbox|netease|netease-musicbox)
                 ENABLE_MUSICBOX=1; picked+=("musicbox") ;;
             musicdl|mdl)
@@ -498,7 +502,7 @@ parse_sources() {
                 ;;
         esac
     done
-    if [ "${ENABLE_MUSICDL}" -eq 0 ] && [ "${ENABLE_MUSICBOX}" -eq 0 ] && [ "${ENABLE_LX}" -eq 0 ]; then
+    if [ "${ENABLE_MUSICDL}" -eq 0 ] && [ "${ENABLE_MUSICBOX}" -eq 0 ] && [ "${ENABLE_LX}" -eq 0 ] && [ "${ENABLE_YOUTUBE}" -eq 0 ]; then
         log_err "至少选择一个音源（musicbox / musicdl / lxmusic）"
         exit 1
     fi
@@ -1172,6 +1176,8 @@ chmod 0644 \
     "${BASE_DIR}/webui-service/static/app.js" "${BASE_DIR}/webui-service/static/style.css" \
     2>/dev/null || true
 
+YOUTUBE_FLAG="false"
+[ "${ENABLE_YOUTUBE}" -eq 1 ] && YOUTUBE_FLAG="true"
 MUSICDL_FLAG="false"
 MUSICBOX_FLAG="false"
 LX_FLAG="false"
@@ -1206,6 +1212,7 @@ ENV_DESIRED="$(mktemp)"
     echo "FNMUSIC_PLT_DIR='$(dotenv_escape "${BASE_DIR}/playlist_tracks")'"
     echo "FNMUSIC_PLAY_HISTORY_DIR='$(dotenv_escape "${BASE_DIR}/play_history")'"
     echo "FNMUSIC_RECOMMEND_DIR='$(dotenv_escape "${BASE_DIR}/recommend_cache")'"
+    echo "FNMUSIC_YOUTUBE_ENABLED='${YOUTUBE_FLAG}'"
     echo "FNMUSIC_MUSICDL_ENABLED='${MUSICDL_FLAG}'"
     echo "FNMUSIC_NETEASE_ENABLED='${MUSICBOX_FLAG}'"
     echo "FNMUSIC_MUSICDL_URL='http://127.0.0.1:8768'"
@@ -1250,7 +1257,7 @@ ENV_DESIRED="$(mktemp)"
 } > "${ENV_DESIRED}"
 
 # 用户本次明确提供了新值的键（音源开关/WebUI/版本/部署模式为安装时部署选项，始终采用新值）
-ENV_EXPLICIT="FNMUSIC_MUSICDL_ENABLED,FNMUSIC_NETEASE_ENABLED,FNMUSIC_LX_ENABLED,FNMUSIC_WEBUI_ENABLED,FNMUSIC_VERSION,FNMUSIC_DEPLOY_MODE,FNMUSIC_SEARCH_PROBE"
+ENV_EXPLICIT="FNMUSIC_YOUTUBE_ENABLED,FNMUSIC_MUSICDL_ENABLED,FNMUSIC_NETEASE_ENABLED,FNMUSIC_LX_ENABLED,FNMUSIC_WEBUI_ENABLED,FNMUSIC_VERSION,FNMUSIC_DEPLOY_MODE,FNMUSIC_SEARCH_PROBE"
 [ "${ENABLE_LX}" -eq 1 ] && ENV_EXPLICIT="${ENV_EXPLICIT},FNMUSIC_LX_URL"
 # lx 源种子（校验通过后会再写一次推导出的 LX_SOURCE_LIST/LX_SOURCES）
 [ "${ENABLE_LX}" -eq 1 ] && [ -n "${LX_SOURCE_URLS}" ] && ENV_EXPLICIT="${ENV_EXPLICIT},LX_SOURCE_LIST,LX_SOURCE_URL"

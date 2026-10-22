@@ -22,6 +22,7 @@ check() {
     fi
 }
 
+check youtube FNMUSIC_YOUTUBE_ENABLED
 check musicdl FNMUSIC_MUSICDL_ENABLED
 check musicbox FNMUSIC_NETEASE_ENABLED
 # 网易云歌单常驻（issue #38）：musicbox 非当前音源但常驻开启时应常驻运行。
