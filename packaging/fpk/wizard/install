@@ -9,9 +9,13 @@
             {
                 "type": "radio",
                 "field": "wizard_sources",
-                "label": "初始音源（三选一）",
+                "label": "初始音源（四选一）",
                 "initValue": "musicdl",
                 "options": [
+                    {
+                        "label": "YouTube Music — 音频搜索播放（可导入专用浏览器会话）",
+                        "value": "youtube"
+                    },
                     {
                         "label": "musicdl — 聚合音源（免登录，酷我/咪咕等多平台可选）",
                         "value": "musicdl"
