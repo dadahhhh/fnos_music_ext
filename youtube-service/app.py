@@ -24,6 +24,7 @@ import requests
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from ytmusicapi import YTMusic, OAuthCredentials
+from ytmusicapi.exceptions import YTMusicError
 import yt_dlp
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -125,7 +126,7 @@ def oauth_action(action: str, values: dict) -> dict:
                 raise ValueError("Configure your Google OAuth client first")
             with _session() as session:
                 result = google_post(session, "device/code", {"client_id": config["client_id"],
-                    "scope": "https://www.googleapis.com/auth/youtube.readonly"})
+                    "scope": "https://www.googleapis.com/auth/youtube"})
             if not all(result.get(k) for k in ("device_code", "user_code", "expires_in")):
                 raise ValueError("Google rejected the device request; check client type and API configuration")
             _oauth_pending.clear()
@@ -156,7 +157,7 @@ def oauth_action(action: str, values: dict) -> dict:
                 if not all(result.get(k) for k in ("access_token", "refresh_token", "expires_in")):
                     raise ValueError("Incomplete OAuth token response")
                 config["token"] = {k: result[k] for k in ("access_token", "refresh_token", "expires_in", "token_type", "scope") if k in result}
-                config["token"].setdefault("scope", "https://www.googleapis.com/auth/youtube.readonly")
+                config["token"].setdefault("scope", "https://www.googleapis.com/auth/youtube")
                 config["token"].setdefault("token_type", "Bearer")
                 config["token"]["expires_at"] = int(time.time()) + int(result["expires_in"])
                 oauth_write(config)
@@ -231,8 +232,8 @@ def _session() -> requests.Session:
     return session
 
 
-def client(session: requests.Session) -> YTMusic:
-    oauth = oauth_token(session)
+def client(session: requests.Session, use_oauth: bool = True) -> YTMusic:
+    oauth = oauth_token(session) if use_oauth else None
     if oauth:
         auth, credentials = oauth
         return YTMusic(auth=auth, oauth_credentials=credentials, requests_session=session)
@@ -287,7 +288,15 @@ def search_sync(keyword: str, limit: int) -> list:
             return cached[1]
     try:
         with _session() as session:
-            rows = client(session).search(keyword, filter="songs", limit=limit, ignore_spelling=True)
+            try:
+                rows = client(session).search(keyword, filter="songs", limit=limit, ignore_spelling=True)
+            except YTMusicError:
+                # A granted Google token can still be rejected by Music's
+                # private API. Public search can use the separately saved
+                # browser session without discarding or altering OAuth tokens.
+                if not oauth_status_sync().get("authorized"):
+                    raise
+                rows = client(session, use_oauth=False).search(keyword, filter="songs", limit=limit, ignore_spelling=True)
     except requests.RequestException:
         rows = []
     items = [item for row in rows if (item := normalize(row))][:limit]

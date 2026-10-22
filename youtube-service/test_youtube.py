@@ -144,6 +144,16 @@ def test_nonempty_music_catalog_keeps_primary_results(monkeypatch):
     assert y._catalog_mode == "youtube_music"
 
 
+def test_public_search_uses_browser_session_when_music_rejects_oauth(monkeypatch):
+    oauth_client = Mock(search=Mock(side_effect=y.YTMusicError('Music rejected token')))
+    browser_client = Mock(search=Mock(return_value=[{'videoId':'abcdefghijk','title':'Fixture'}]))
+    factory = Mock(side_effect=[oauth_client, browser_client])
+    monkeypatch.setattr(y, 'client', factory)
+    monkeypatch.setattr(y, 'oauth_status_sync', lambda: {'authorized':True})
+    assert y.search_sync('fixture', 2)[0]['title'] == 'Fixture'
+    assert factory.call_args.kwargs == {'use_oauth':False}
+
+
 def test_oauth_device_flow_refresh_and_logout(monkeypatch):
     cid = 'fixture.apps.googleusercontent.com'
     secret = 'fixture-client-secret'
