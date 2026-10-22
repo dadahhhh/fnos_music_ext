@@ -130,7 +130,7 @@ class TestWizard:
         assert "wizard_webui_password" not in fields
         radio = next(it for it in items if it["type"] == "radio")
         values = {opt["value"] for opt in radio["options"]}
-        assert values == {"musicdl", "musicbox", "lxmusic"}
+        assert values == {"musicdl", "musicbox", "lxmusic", "youtube"}
 
     def test_fnpack_quirks(self, stage: Path):
         """fnpack 实测逆向出的两条硬规则（布尔 initValue / tips 用 text 会打包失败）。"""
