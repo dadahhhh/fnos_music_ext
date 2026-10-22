@@ -241,7 +241,10 @@ def client(session: requests.Session) -> YTMusic:
     if path.is_file():
         jar = cookie_jar(path.read_text(encoding="utf-8"))
         cookie = "; ".join(f"{c.name}={c.value}" for c in jar)
-        auth = {"authorization": "", "cookie": cookie, "x-goog-authuser": "0", "x-origin": "https://music.youtube.com",
+        from ytmusicapi.helpers import get_authorization
+        sapisid = next((c.value for c in jar if c.name == "SAPISID"),
+                       next(c.value for c in jar if c.name == "__Secure-3PAPISID"))
+        auth = {"authorization": get_authorization(sapisid + " https://music.youtube.com"), "cookie": cookie, "x-goog-authuser": "0", "x-origin": "https://music.youtube.com",
                 "user-agent": "Mozilla/5.0", "accept": "*/*", "content-type": "application/json"}
     return YTMusic(auth=auth, requests_session=session)
 
